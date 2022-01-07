@@ -75,8 +75,8 @@ count_files() {
     find "${1:?"BUG! Missing parameter"}" -type f -printf x | wc -c
 }
 
-# Computes the MD5s of every file under folder $1, and print them sorted by
-# MD5.
+# Computes the MD5s of every file under folder $1, and prints them sorted by
+# MD5 using NUL as the delimiter.
 write_sorted_md5sums() {
     # Here, we cd to the folder first, so that paths in the MD5 lines are relative
     # to $1
@@ -86,23 +86,24 @@ write_sorted_md5sums() {
     )
 }
 
-# Given two files $1 and $2 produced by "md5sum -b" sorted by hash, compute the difference
+# Given two files $1 and $2 produced by "md5sum -b -z" sorted by hash, compute the difference
 # $1 - $2, yielding the paths (the MD5 is stripped) of files in $1 that are not present in $2.
+# Paths are separated by NUL.
 md5_difference() {
     : "${1:?"BUG! Missing parameter"}"
     : "${2:?"BUG! Missing parameter"}"
     join -z -i -j 1 -t ' ' -v 1 "$1" "$2" | sed -z 's/^[^*]*\*//'
 }
 
-# Given two files $1 and $2 produced by "md5sum -b" sorted by hash, compute their intersection,
-# yielding the MD5s (paths are stripped) that appear in both files.
+# Given two files $1 and $2 produced by "md5sum -b -z" sorted by hash, compute their intersection,
+# yielding the MD5s (paths are stripped) that appear in both files. The digests are separated by \n.
 md5_intersection() {
     : "${1:?"BUG! Missing parameter"}"
     : "${2:?"BUG! Missing parameter"}"
     join -z -i -j 1 -t ' ' -o 1.1 "$1" "$2" | tr '\0' '\n' | uniq
 }
 
-# Given an MD5 $1 and a file $2 produced by "md5sum -b", prints all lines where the MD5 matches $1
+# Given an MD5 $1 and a file $2 produced by "md5sum -b -z", prints all lines where the MD5 matches $1
 md5_find_all_matches() {
     : "${1:?"BUG! Missing parameter"}"
     : "${2:?"BUG! Missing parameter"}"
@@ -142,22 +143,23 @@ while [ $OPTIND -le $# ]; do
        ;;
     *) 
         cat << EOF
-$0 -w windows_installer -l linux_installer [-o output_dir] [-c compression_options]
+$0 -w windows_installer -l linux_installer [-o output_dir] [-c
+compression_options]
 
 windows_installer is either the path of a GOG Windows game installer executable
-or the path to a folder where such a game has already been installed (this is where
-you would find "gog.ico")
+or the path to a folder where such a game has already been installed (this is
+where you would find "gog.ico")
 
-linux_installer is either the path of a GOG Linux game installer executable
-or the path to a folder where such a game has already been installed (this is where
-you would find "gameinfo")
+linux_installer is either the path of a GOG Linux game installer executable or
+the path to a folder where such a game has already been installed (this is
+where you would find "gameinfo")
 
-output_dir points to a folder under which temporary games installation (if required)
-are placed, along which any file needed by this script. The final delta archive is also
-stored there. It defaults to /tmp/gog_repack.
+output_dir points to a folder under which temporary games installation (if
+required) are placed, along which any file needed by this script. The final
+delta archive is also stored there. It defaults to /tmp/gog_repack.
 
-compression_options are passed to tar when creating the delta archive. The default is
--z, which result in an gzipped tar.
+compression_options are passed to tar when creating the delta archive. The
+default is -z, which result in an gzipped tar.
 EOF
         exit 1
        ;;
@@ -181,7 +183,6 @@ linuxinstaller="$(realpath "$linuxinstaller")"
 outputdir="$(realpath "$outputdir")"
 md5dir="$outputdir/digests"
 script="$outputdir/gogdiff_delta.sh"
-# These two folders will be overridden
 windir="$outputdir/windows"
 linuxdir="$outputdir/linux"
 # Folder for setup-generated files we want to throw away
@@ -191,6 +192,7 @@ if [ -d "$wininstaller" ]; then
     info "The Windows installer is actually a folder: using its contents for the Windows game installation"
     wingamedir="$wininstaller"
 else
+    # The installer will be configured to place files in this subdir
     wingamedir="$windir/drive_c/goggame"
 fi
 info "Windows game files will be fetched from $wingamedir"
@@ -199,6 +201,7 @@ if [ -d "$linuxinstaller" ]; then
     info "The Linux installer is actually a folder: using its contents for the Linux game installation"
     linuxgamedir="$linuxinstaller"
 else
+    # The installer will be configured to place files here
     linuxgamedir="$linuxdir"
 fi
 info "Linux game files will be fetched from $linuxgamedir"
