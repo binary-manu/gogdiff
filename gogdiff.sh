@@ -184,6 +184,8 @@ script="$outputdir/gogdiff_delta.sh"
 # These two folders will be overridden
 windir="$outputdir/windows"
 linuxdir="$outputdir/linux"
+# Folder for setup-generated files we want to throw away
+junkdir="$outputdir/junk"
 
 if [ -d "$wininstaller" ]; then
     info "The Windows installer is actually a folder: using its contents for the Windows game installation"
@@ -217,12 +219,14 @@ step_windows_installer() {
 
 step_linux_installer() {
     info "Launching the Linux installer. Installation is fully automated."
-    rm -rf "$linuxdir"
-    mkdir -p "$linuxdir"
+    rm -rf "$linuxdir" "$junkdir"
+    mkdir -p "$linuxdir" "$junkdir"
 
     # Run the Linux installer
     enter_tagged_logging LINUX
-        env "$linuxinstaller" --noprogress -- --i-agree-to-all-licenses --noreadme --nooptions --noprompt --destination "$linuxdir" ||
+        env HOME="$junkdir" "$linuxinstaller" --noprogress -- \
+            --i-agree-to-all-licenses --noreadme --nooptions \
+            --noprompt --destination "$linuxdir" ||
             fatal "The Linux installer failed. Aborting."
         info "Linux installer returned OK. Continuing."
     enter_tagged_logging
