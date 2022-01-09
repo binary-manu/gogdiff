@@ -6,7 +6,7 @@ set -eo pipefail
 ###### Logging functions ######
 ###############################
 
-# stderr and stdout are sent to two processes which append
+# stderr and stdout are sent to two processes which prepend
 # tags to every line.
 
 # The original stdout and stderr are moved to these two fds
@@ -103,7 +103,7 @@ md5_intersection() {
     join -z -i -j 1 -t ' ' -o 1.1 "$1" "$2" | tr '\0' '\n' | uniq
 }
 
-# Given an MD5 $1 and a file $2 produced by "md5sum -b -z", prints all lines where the MD5 matches $1
+# Given an MD5 $1 and a file $2 produced by "md5sum -b -z", prints all pathnames whose MD5s match $1
 md5_find_all_matches() {
     : "${1:?"BUG! Missing parameter"}"
     : "${2:?"BUG! Missing parameter"}"
@@ -143,23 +143,26 @@ while [ $OPTIND -le $# ]; do
        ;;
     *) 
         cat << EOF
-$0 -w windows_installer -l linux_installer [-o output_dir] [-c
-compression_options]
+$0 -w <wininst> -l <linuxinst> -o <outdir> [-c <compopts>] [-s <firststep>]
 
-windows_installer is either the path of a GOG Windows game installer executable
+<wininst> is either the path to a GOG Windows game installer executable
 or the path to a folder where such a game has already been installed (this is
-where you would find "gog.ico")
+where you would find "gog.ico").
 
-linux_installer is either the path of a GOG Linux game installer executable or
+<linuxinst> is either the path to a GOG Linux game installer executable or
 the path to a folder where such a game has already been installed (this is
 where you would find "gameinfo")
 
-output_dir points to a folder under which temporary games installation (if
-required) are placed, along which any file needed by this script. The final
-delta archive is also stored there. It defaults to /tmp/gog_repack.
+<outdir> points to a folder under which temporary games installations (if
+required) are placed, plus which any files needed by this script. The final
+delta script is also stored there, named gogdiff_delta.sh.
 
-compression_options are passed to tar when creating the delta archive. The
-default is -z, which result in an gzipped tar.
+<compopts> are passed to tar when compressing Linux-only files, and also
+stored in the delta script. The default is -z, which result in an gzipped tar.
+
+<firststep> is the script step where to start. It can be used to skip
+steps such as game installations, that have already been done. Steps are:
+windows, linuz, digest, script.
 EOF
         exit 1
        ;;
@@ -237,7 +240,7 @@ step_linux_installer() {
 
 step_compute_md5() {
     info "Now we'll look for duplicate files within the two installations."
-    info "We'll need to compute the MD5 digests of all files, so this may take a while"
+    info "We'll need to compute the MD5 digests of all files, so this may take a while."
     info "The Windows installation contains $(count_files "$wingamedir") files"
     info "The Linux installation contains $(count_files "$linuxgamedir") files"
 
@@ -251,7 +254,7 @@ step_compute_md5() {
     md5_difference "$md5dir/windows.md5" "$md5dir/linux.md5"   > "$md5dir/windows.path"
     md5_difference "$md5dir/linux.md5"   "$md5dir/windows.md5" > "$md5dir/linux.path"
     # Extract the set of common MD5s between Linux and Windows
-    md5_intersection "$md5dir/windows.md5" "$md5dir/linux.md5"   > "$md5dir/common.md5"
+    md5_intersection "$md5dir/windows.md5" "$md5dir/linux.md5" > "$md5dir/common.md5"
 }
 
 step_create_script() {
