@@ -70,6 +70,11 @@ enter_tagged_logging() {
 ########## Utilities ##########
 ###############################
 
+# Placeholder for delta script header size. Will be replaced by the mount of
+# script data before the compressed archive. Must be at leass as long as the decimal
+# representation of the size of header code.
+declare -r size_placeholder=XXXXXXXXX
+
 # Count regular files under $1
 count_files() {
     find "${1:?"BUG! Missing parameter"}" -type f -printf x | wc -c
@@ -286,7 +291,7 @@ remove_file() {
 }
 
 extract() {
-    dd skip=XXXXXXXXX iflag=skip_bytes if="$0" | tar -x '"$compressopts"' -f-
+    dd skip='"$size_placeholder"' iflag=skip_bytes if="$0" | tar -x '"$compressopts"' -f-
 }
 
 if [ -n "$GOGDIFF_EXTRACTONLY" ]; then
@@ -336,7 +341,7 @@ fi
     } > "$script"
 
     # We are done with $script, replace the header size placeholder
-    sed -i '/^\s*dd skip=/ s/XXXXXXXXX/'"$(printf %-9d "$(stat -c %s "$script")")"/ "$script"
+    sed -i '/^\s*dd skip=/ s/'"$size_placeholder"/"$(printf %-${#size_placeholder}d "$(stat -c %s "$script")")"/ "$script"
 
     # Append Linux-only files
     # We should also save symlinks, as they were not hashed and do not appear in linux.path
