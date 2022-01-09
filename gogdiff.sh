@@ -284,6 +284,15 @@ copy_file() {
 remove_file() {
     rm ${GOGDIFF_VERBOSE:+-v} "$1"
 }
+
+extract() {
+    dd skip=XXXXXXXXX iflag=skip_bytes if="$0" | tar -x '"$compressopts"' -f-
+}
+
+if [ -n "$GOGDIFF_EXTRACTONLY" ]; then
+    extract
+    exit
+fi
 '
 
         # Delete Windows-only files
@@ -313,9 +322,7 @@ remove_file() {
         printf 'find . -type d -empty -delete\n'
 
         # Unpack the Linux only files, which are stored in a compressed tar just after the code
-        # The Xs will be replaced by the script size after all code has been written.
-        # shellcheck disable=SC2016 # variables should be expanded in the script, not here
-        printf '%s\n' 'dd skip=XXXXXXXXX iflag=skip_bytes if="$0" | tar -x '"$compressopts"' -f-'
+        printf 'extract\n'
 
         # After unpacking, perform MD5 checks on the final files
         # We translate the zero-terminated format to the line-oriented escaped format, since
@@ -329,7 +336,7 @@ remove_file() {
     } > "$script"
 
     # We are done with $script, replace the header size placeholder
-    sed -i '/^dd skip=/ s/XXXXXXXXX/'"$(printf %-9d "$(stat -c %s "$script")")"/ "$script"
+    sed -i '/^\s*dd skip=/ s/XXXXXXXXX/'"$(printf %-9d "$(stat -c %s "$script")")"/ "$script"
 
     # Append Linux-only files
     # We should also save symlinks, as they were not hashed and do not appear in linux.path
