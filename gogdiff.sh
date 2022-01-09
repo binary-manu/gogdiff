@@ -369,6 +369,8 @@ script)
     info "Starting step 'script'"
     step_create_script
     ;;
+*)
+    fatal "Unknown step '$firststep'"
 esac
 
 info "Done! You can now use $script to turn a Windows installation of this game into its Linux equivalent"
