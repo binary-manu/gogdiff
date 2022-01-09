@@ -48,7 +48,7 @@ fatal() {
 # Move stderr to orig_stderr, stdout to orig_stdout,
 # and reopn fds 1 and 2 connected to processes appending tags
 setup_loggers() {
-    eval "exec $orig_stdout>&1 $orig_stderr>&2 >&- 2>&-"
+    eval "exec $orig_stdout>&1 $orig_stderr>&2"
     enter_tagged_logging
 }
 
@@ -309,7 +309,7 @@ fi
                 # clashes between Windows filenames to delete and the new Linux path.
                 
                 # All other Windows pathnames for the same MD5 are deleted
-                xargs -0 -r printf 'remove_file %q\n' <&11
+                xargs -0 -r -I'{}' printf 'remove_file %q\n' '{}' <&11
 
                 printf 'move_file %s %s\n' "$wpath" "$lpath"
 
@@ -327,7 +327,7 @@ fi
         # After unpacking, perform MD5 checks on the final files
         # We translate the zero-terminated format to the line-oriented escaped format, since
         # md5sum does not allow -z and -c at the same time.
-        printf '%s\n' '[ -n "GOGDIFF_CHECKFILES" ] && md5sum -c << EOF'
+        printf '%s\n' '[ -z "$GOGDIFF_SKIPDIGESTS" ] && md5sum -c << EOF'
         sed -z -E 's/\\/\\\\/g; s/\n/\\n/g; s/\r/\\r/g; s/(.*)/\\\1/' "$md5dir/linux.md5" | tr '\0' '\n'
         printf 'EOF\n'
 
