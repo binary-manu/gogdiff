@@ -129,7 +129,7 @@ readline_null_terminated() {
 ###############################
 
 # On clean exit or signals, flush loggers
-trap 'teardown_loggers' EXIT INT QUIT TERM
+trap 'clean; teardown_loggers' EXIT INT QUIT TERM
 setup_loggers
 
 OPTIND=1
@@ -193,8 +193,19 @@ md5dir="$outputdir/digests"
 script="$outputdir/gogdiff_delta.sh"
 windir="$outputdir/windows"
 linuxdir="$outputdir/linux"
-# Folder for setup-generated files we want to throw away
 junkdir="$outputdir/junk"
+# The Linux installer doesn't like spaces in the destination folder path, so
+# we create a symlink under /tmp that points to the installation directory and
+# remove it on exit.
+outputsymlink="$(mktemp -p /tmp)"
+ln -sf "$outputdir" "$outputsymlink"
+# Folder for setup-generated files we want to throw away
+junksymlink="$outputsymlink/$(basename "$junkdir")"
+linuxsymlink="$outputsymlink/$(basename "$linuxdir")"
+
+clean() {
+    rm -f "$outputsymlink"
+}
 
 if [ -d "$wininstaller" ]; then
     info "The Windows installer is actually a folder: using its contents for the Windows game installation"
@@ -221,7 +232,7 @@ step_windows_installer() {
     mkdir -p "$windir"
 
     enter_tagged_logging WINDOWS
-        WINEPREFIX="$windir" wine "$wininstaller" \
+        WINEPREFIX="$windir" WINEDLLOVERRIDES=winemenubuilder.exe=d wine "$wininstaller" \
             /NOICONS /DIR='c:\goggame' ||
             fatal "The Windows installer failed. Aborting."
         info "Windows installer returned OK. Continuing."
@@ -235,9 +246,9 @@ step_linux_installer() {
 
     # Run the Linux installer
     enter_tagged_logging LINUX
-        env HOME="$junkdir" "$linuxinstaller" --noprogress -- \
+        env HOME="$junksymlink" "$linuxinstaller" --noprogress -- \
             --i-agree-to-all-licenses --noreadme --nooptions \
-            --noprompt --destination "$linuxdir" ||
+            --noprompt --destination "$linuxsymlink" ||
             fatal "The Linux installer failed. Aborting."
         info "Linux installer returned OK. Continuing."
     enter_tagged_logging
