@@ -181,9 +181,9 @@ if [ -z "$firststep" ]; then
     info "The initial step was not specified, restarting from the beginning"
 fi
 
-wininstaller="$(realpath "$wininstaller")"
-linuxinstaller="$(realpath "$linuxinstaller")"
-outputdir="$(realpath "$outputdir")"
+wininstaller="$(realpath -e "$wininstaller")"
+linuxinstaller="$(realpath -e "$linuxinstaller")"
+outputdir="$(realpath -m "$outputdir")"
 md5dir="$outputdir/digests"
 script="$outputdir/gogdiff_delta.sh"
 windir="$outputdir/windows"
