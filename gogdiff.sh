@@ -341,6 +341,14 @@ extract() {
     dd skip='"$size_placeholder"' iflag=skip_bytes if="$0" status=none | tar -x ${GOGDIFF_VERBOSE:+-v} '"$compressopts"' -f-
 }
 
+verify() {
+    if [ -z "$GOGDIFF_VERBOSE" ]; then
+        md5sum -c --quiet
+    else
+        md5sum -c
+    fi
+}
+
 if [ -n "$GOGDIFF_EXTRACTONLY" ]; then
     extract
     exit
@@ -379,7 +387,7 @@ fi
         # After unpacking, perform MD5 checks on the final files
         # We translate the zero-terminated format to the line-oriented escaped format, since
         # md5sum does not allow -z and -c at the same time.
-        printf '%s\n' '[ -z "$GOGDIFF_SKIPDIGESTS" ] && md5sum -c << EOF'
+        printf '%s\n' '[ -z "$GOGDIFF_SKIPDIGESTS" ] && verify << EOF'
         sed -z -E 's/\\/\\\\/g; s/\n/\\n/g; s/\r/\\r/g; s/(.*)/\\\1/' "$md5dir/linux.md5" | tr '\0' '\n'
         printf 'EOF\n'
 
