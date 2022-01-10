@@ -41,6 +41,8 @@ info_stream() {
 
 # Print the arguments to stderr and exit
 fatal() {
+    exit_code="$1"
+    shift
     error "$@"
     exit 1
 }
@@ -65,6 +67,14 @@ enter_tagged_logging() {
     exec > >(info_stream "$tag" >&$orig_stdout) 2> >(error_stream "$tag" 2>&$orig_stderr)
 }
 
+###############################
+######### Error codes #########
+###############################
+declare -r ERR_BADCLI=2
+declare -r ERR_WININSTFAILED=3
+declare -r ERR_LINUXINSTFAILED=4
+declare -r ERR_NOCOMMONFILES=5
+declare -r ERR_ALLCOMMONFILES=6
 
 ###############################
 ########## Utilities ##########
@@ -128,8 +138,8 @@ readline_null_terminated() {
 ############ Main #############
 ###############################
 
-# On clean exit or signals, flush loggers
-trap 'clean; teardown_loggers' EXIT INT QUIT TERM
+trap 'clean_exit' EXIT
+trap 'clean_signal' INT QUIT TERM
 setup_loggers
 
 OPTIND=1
@@ -174,9 +184,9 @@ EOF
     esac
 done
 
-[ -z "$wininstaller" ] && fatal "The Windows installer file must be specified with -w"
-[ -z "$linuxinstaller" ] && fatal "The Linux installer file must be specified with -l"
-[ -z "$outputdir" ] && fatal "The output folder must be specified with -o"
+[ -z "$wininstaller" ] && fatal $ERR_BADCLI "The Windows installer file must be specified with -w"
+[ -z "$linuxinstaller" ] && fatal $ERR_BADCLI "The Linux installer file must be specified with -l"
+[ -z "$outputdir" ] && fatal $ERR_BADCLI "The output folder must be specified with -o"
 if [ -z "$compressopts" ]; then
     compressopts="-z"
     info "Compression options were not specified, defaulting to $compressopts"
@@ -203,8 +213,19 @@ ln -sf "$outputdir" "$outputsymlink"
 junksymlink="$outputsymlink/$(basename "$junkdir")"
 linuxsymlink="$outputsymlink/$(basename "$linuxdir")"
 
-clean() {
+# Override exit codes for terminations caused by set -e to 1, while allowing us
+# to return specific codes for specific errors.
+exit_code=1
+
+clean_signal() {
+    set +e
     rm -f "$outputsymlink"
+    teardown_loggers
+}
+
+clean_exit() {
+    clean_signal
+    exit "$exit_code"
 }
 
 if [ -d "$wininstaller" ]; then
@@ -234,7 +255,7 @@ step_windows_installer() {
     enter_tagged_logging WINDOWS
         WINEPREFIX="$windir" WINEDLLOVERRIDES=winemenubuilder.exe=d wine "$wininstaller" \
             /NOICONS /DIR='c:\goggame' ||
-            fatal "The Windows installer failed. Aborting."
+            fatal $ERR_WININSTFAILED "The Windows installer failed. Aborting."
         info "Windows installer returned OK. Continuing."
     enter_tagged_logging
 }
@@ -249,7 +270,7 @@ step_linux_installer() {
         env HOME="$junksymlink" "$linuxinstaller" --noprogress -- \
             --i-agree-to-all-licenses --noreadme --nooptions \
             --noprompt --destination "$linuxsymlink" ||
-            fatal "The Linux installer failed. Aborting."
+            fatal $ERR_LINUXINSTFAILED "The Linux installer failed. Aborting."
         info "Linux installer returned OK. Continuing."
     enter_tagged_logging
 }
@@ -271,6 +292,21 @@ step_compute_md5() {
     md5_difference "$md5dir/linux.md5"   "$md5dir/windows.md5" > "$md5dir/linux.path"
     # Extract the set of common MD5s between Linux and Windows
     md5_intersection "$md5dir/windows.md5" "$md5dir/linux.md5" > "$md5dir/common.md5"
+
+    # Let's filter some corner cases that make a delta script useless.
+    # We don't want to go head if:
+    #  1) all files are common: clearly there is no advantage is a script
+    #     that has nothing to add or remove;
+    #  2) no files are common: we have just two completely unrelated folders
+    #     and can just keep their installers
+    local ncommon="$(wc -l "$md5dir/common.md5" | cut -d ' ' -f 1)"
+    local nwin="$(wc -c "$md5dir/windows.path" | cut -d ' ' -f 1)"
+    local nlinux="$(wc -c "$md5dir/linux.path" | cut -d ' ' -f 1)"
+    info "There are $ncommon common files betwwen the two game releases."
+    [ "$ncommon" -eq 0 ] && fatal $ERR_NOCOMMONFILES "Not producing a delta script with no common files."
+    if [ "$nwin" -eq 0 ] && [ "$nlinux" -eq 0 ]; then
+        fatal $ERR_ALLCOMMONFILES "ALL files are common! You don't need a delta script."
+    fi
 }
 
 step_create_script() {
@@ -386,7 +422,8 @@ script)
     step_create_script
     ;;
 *)
-    fatal "Unknown step '$firststep'"
+    fatal $ERR_BADCLI "Unknown step '$firststep'"
 esac
 
 info "Done! You can now use $script to turn a Windows installation of this game into its Linux equivalent"
+exit_code=0
