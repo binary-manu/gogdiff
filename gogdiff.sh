@@ -302,7 +302,7 @@ remove_file() {
 }
 
 extract() {
-    dd skip='"$size_placeholder"' iflag=skip_bytes if="$0" | tar -x '"$compressopts"' -f-
+    dd skip='"$size_placeholder"' iflag=skip_bytes if="$0" status=none | tar -x ${GOGDIFF_VERBOSE:+-v} '"$compressopts"' -f-
 }
 
 if [ -n "$GOGDIFF_EXTRACTONLY" ]; then
