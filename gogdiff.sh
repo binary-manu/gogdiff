@@ -388,7 +388,7 @@ fi
         # We translate the zero-terminated format to the line-oriented escaped format, since
         # md5sum does not allow -z and -c at the same time.
         printf '%s\n' '[ -z "$GOGDIFF_SKIPDIGESTS" ] && verify << EOF'
-        sed -z -E 's/\\/\\\\/g; s/\n/\\n/g; s/\r/\\r/g; s/(.*)/\\\1/' "$md5dir/linux.md5" | tr '\0' '\n'
+        sed -z -E '/[\n\r]/ { s/\\/\\\\/g; s/\n/\\n/g; s/\r/\\r/g; s/(.*)/\\\1/; }' "$md5dir/linux.md5" | tr '\0' '\n'
         printf 'EOF\n'
 
         # Ensure we don't try to execute the tar at the end
