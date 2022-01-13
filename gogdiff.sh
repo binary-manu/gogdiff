@@ -294,17 +294,15 @@ step_compute_md5() {
 
     # Let's filter some corner cases that make a delta script useless.
     # We don't want to go head if:
-    #  1) all files are common: clearly there is no advantage is a script
-    #     that has nothing to add or remove;
+    #  1) the two folders are identical: clearly there is no advantage is a script
+    #     that has nothing to add, remove or just rename;
     #  2) no files are common: we have just two completely unrelated folders
     #     and can just keep their installers
     local ncommon="$(wc -l "$md5dir/common.md5" | cut -d ' ' -f 1)"
-    local nwin="$(wc -c "$md5dir/windows.path" | cut -d ' ' -f 1)"
-    local nlinux="$(wc -c "$md5dir/linux.path" | cut -d ' ' -f 1)"
     info "There are $ncommon common files betwwen the two game releases."
     [ "$ncommon" -eq 0 ] && fatal $ERR_NOCOMMONFILES "Not producing a delta script with no common files."
-    if [ "$nwin" -eq 0 ] && [ "$nlinux" -eq 0 ]; then
-        fatal $ERR_ALLCOMMONFILES "ALL files are common! You don't need a delta script."
+    if cmp "$md5dir/windows.md5" "$md5dir/linux.md5"; then
+        fatal $ERR_ALLCOMMONFILES "The folders are identical! You don't need a delta script."
     fi
 }
 
