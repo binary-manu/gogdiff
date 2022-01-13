@@ -298,7 +298,8 @@ step_compute_md5() {
     #     that has nothing to add, remove or just rename;
     #  2) no files are common: we have just two completely unrelated folders
     #     and can just keep their installers
-    local ncommon="$(wc -l "$md5dir/common.md5" | cut -d ' ' -f 1)"
+    local ncommon
+    ncommon="$(wc -l "$md5dir/common.md5" | cut -d ' ' -f 1)"
     info "There are $ncommon common files betwwen the two game releases."
     [ "$ncommon" -eq 0 ] && fatal $ERR_NOCOMMONFILES "Not producing a delta script with no common files."
     if cmp "$md5dir/windows.md5" "$md5dir/linux.md5"; then
@@ -357,6 +358,8 @@ fi
 
         # Generate code that renames common files from their Windows name to the Linux name.
         # A file with a given MD5 may appear multiple times on both systems.
+        local wpath
+        local lpath
         while read -r common; do
             {
                 # The first Windows pathname is simply moved to the correponding first Linux pathname
@@ -384,6 +387,7 @@ fi
         # After unpacking, perform MD5 checks on the final files
         # We translate the zero-terminated format to the line-oriented escaped format, since
         # md5sum does not allow -z and -c at the same time.
+        # shellcheck disable=SC2016 # variables should be expanded in the script, not here
         printf '%s\n' '[ -z "$GOGDIFF_SKIPDIGESTS" ] && verify << EOF'
         sed -z -E '/[\n\r]/ { s/\\/\\\\/g; s/\n/\\n/g; s/\r/\\r/g; s/(.*)/\\\1/; }' "$md5dir/linux.md5" | tr '\0' '\n'
         printf 'EOF\n'
