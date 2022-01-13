@@ -138,6 +138,20 @@ readline_null_terminated() {
 ############ Main #############
 ###############################
 
+# Override exit codes for terminations caused by set -e to 1, while allowing us
+# to return specific codes for specific errors.
+exit_code=1
+clean_signal() {
+    set +e
+    [ -n "$outputsymlink" ] && rm -f "$outputsymlink"
+    teardown_loggers
+}
+
+clean_exit() {
+    clean_signal
+    exit "$exit_code"
+}
+
 trap 'clean_exit' EXIT
 trap 'clean_signal' INT QUIT TERM
 setup_loggers
@@ -212,21 +226,6 @@ ln -sf "$outputdir" "$outputsymlink"
 # Folder for setup-generated files we want to throw away
 junksymlink="$outputsymlink/$(basename "$junkdir")"
 linuxsymlink="$outputsymlink/$(basename "$linuxdir")"
-
-# Override exit codes for terminations caused by set -e to 1, while allowing us
-# to return specific codes for specific errors.
-exit_code=1
-
-clean_signal() {
-    set +e
-    rm -f "$outputsymlink"
-    teardown_loggers
-}
-
-clean_exit() {
-    clean_signal
-    exit "$exit_code"
-}
 
 if [ -d "$wininstaller" ]; then
     info "The Windows installer is actually a folder: using its contents for the Windows game installation"
