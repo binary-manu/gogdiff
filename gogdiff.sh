@@ -402,7 +402,8 @@ fi
     # We should also save symlinks, as they were not hashed and do not appear in linux.path
     (
         cd "$linuxgamedir"
-        { find . -type l -print0; cat "$md5dir/linux.path"; } | tar -c $compressopts --verbatim-files-from --null -T-
+        { find . -type l -print0; cat "$md5dir/linux.path"; } |
+            tar -c $compressopts --verbatim-files-from --null -T- --owner=root:0 --group=root:0
     ) >> "$script"
 
     chmod a+x "$script"
