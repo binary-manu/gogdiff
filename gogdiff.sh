@@ -302,7 +302,7 @@ step_compute_md5() {
     ncommon="$(wc -l "$md5dir/common.md5" | cut -d ' ' -f 1)"
     info "There are $ncommon common files betwwen the two game releases."
     [ "$ncommon" -eq 0 ] && fatal $ERR_NOCOMMONFILES "Not producing a delta script with no common files."
-    if cmp "$md5dir/windows.md5" "$md5dir/linux.md5"; then
+    if cmp -s "$md5dir/windows.md5" "$md5dir/linux.md5"; then
         fatal $ERR_ALLCOMMONFILES "The folders are identical! You don't need a delta script."
     fi
 }
