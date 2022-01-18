@@ -353,6 +353,12 @@ if [ -n "$GOGDIFF_EXTRACTONLY" ]; then
 fi
 '
 
+        # Create a temporary directory name that is unique in both $wingamedir and $linuxgamedir
+        local stagingdir
+        while [ -e "$linuxgamedir/$stagingdir" ]; do
+            stagingdir="$(basename "$(mktemp -d -q -u -p "$wingamedir")")"
+        done
+
         # Delete Windows-only files
         xargs -0 -r -I'{}' printf 'remove_file %q\n' '{}' < "$md5dir/windows.path"
 
@@ -365,21 +371,22 @@ fi
                 # The first Windows pathname is simply moved to the correponding first Linux pathname
                 wpath="$(readline_null_terminated <&11 | xargs -0 printf %q)"
                 lpath="$(readline_null_terminated <&12 | xargs -0 printf %q)"
-                # Actual moving is delayed after deleting other files with the same MD5, to avoid
-                # clashes between Windows filenames to delete and the new Linux path.
+                printf 'move_file %s %q/%s\n' "$wpath" "$stagingdir" "$lpath"
                 
                 # All other Windows pathnames for the same MD5 are deleted
                 xargs -0 -r -I'{}' printf 'remove_file %q\n' '{}' <&11
 
-                printf 'move_file %s %s\n' "$wpath" "$lpath"
-
                 # All other Linux pathnames for the same MD5 are symlinked or copied
-                xargs -0 -r -I'{}' printf 'copy_file %s %q\n' "$lpath" '{}' <&12
+                xargs -0 -r -I'{}' printf 'copy_file %q/%s %q/%q\n' "$stagingdir" "$lpath" "$stagingdir" '{}' <&12
             } 11< <(md5_find_all_matches "$common" "$md5dir/windows.md5") 12< <(md5_find_all_matches "$common" "$md5dir/linux.md5") 
         done < "$md5dir/common.md5"
 
         # Delete folders that are now empty
         printf 'find . -type d -empty -delete\n'
+
+        # Move files from the staging directory to the PWD, since there can no longer be conflicts
+        printf 'find %q -mindepth 1 -maxdepth 1 -print0 | xargs -0 -r mv ${GOGDIFF_VERBOSE:+-v} -t .\n' "$stagingdir"
+        printf 'rm ${GOGDIFF_VERBOSE:+-v} -rf %q\n' "$stagingdir" 
 
         # Unpack the Linux only files, which are stored in a compressed tar just after the code
         printf 'extract\n'
