@@ -131,7 +131,8 @@ md5_find_all_matches() {
 # "eats" lots of lines instead of just one.
 # sed with unbuffered input (-u) seems the way, we just tell it to exit after one iteration.
 readline_null_terminated() {
-    sed -z -u q 
+    sed -z -u q | tr -d '\0'
+    printf '\n'
 }
 
 ###############################
@@ -213,19 +214,24 @@ fi
 wininstaller="$(realpath -e "$wininstaller")"
 linuxinstaller="$(realpath -e "$linuxinstaller")"
 outputdir="$(realpath -m "$outputdir")"
+# Important rules:
+# folder base names should only contains chars that can go in a sed
+# basic regexp unescaped, so avoid things like dots. This rule does not apply to files.
 md5dir="$outputdir/digests"
-script="$outputdir/gogdiff_delta.sh"
+patchdir="$outputdir/patches"
 windir="$outputdir/windows"
 linuxdir="$outputdir/linux"
 junkdir="$outputdir/junk"
+script="$outputdir/gogdiff_delta.sh"
 # The Linux installer doesn't like spaces in the destination folder path, so
 # we create a symlink under /tmp that points to the installation directory and
-# remove it on exit.
-outputsymlink="$(mktemp -p /tmp)"
+# remove it on exit. The link should again be usable in a sed expression without escaping.
+outputsymlink="$(mktemp -p /tmp tmpXXXXXXXXXX)"
 ln -sf "$outputdir" "$outputsymlink"
 # Folder for setup-generated files we want to throw away
 junksymlink="$outputsymlink/$(basename "$junkdir")"
 linuxsymlink="$outputsymlink/$(basename "$linuxdir")"
+patchsymlink="$outputsymlink/$(basename "$patchdir")"
 
 if [ -d "$wininstaller" ]; then
     info "The Windows installer is actually a folder: using its contents for the Windows game installation"
@@ -280,8 +286,8 @@ step_compute_md5() {
     info "The Windows installation contains $(count_files "$wingamedir") files"
     info "The Linux installation contains $(count_files "$linuxgamedir") files"
 
-    rm -rf "$md5dir"
-    mkdir -p "$md5dir"
+    rm -rf "$md5dir" "$patchdir"
+    mkdir -p "$md5dir" "$patchdir"
 
     write_sorted_md5sums "$wingamedir" > "$md5dir/windows.md5"
     write_sorted_md5sums "$linuxgamedir" > "$md5dir/linux.md5"
@@ -292,16 +298,45 @@ step_compute_md5() {
     # Extract the set of common MD5s between Linux and Windows
     md5_intersection "$md5dir/windows.md5" "$md5dir/linux.md5" > "$md5dir/common.md5"
 
+    # Look for file with the same basename, which could be used to compute patches with
+    # xdelta3
+    local npatch
+    npatch=0
+    : > "$md5dir/wpatches.path"
+    : > "$md5dir/lpatches.path"
+    printf '%s\0' "$linuxpath" >> "$md5dir/lpatches.path"
+    while :; do
+        base="$(readline_null_terminated)"
+        [ -z "$base" ] && break
+        npatch=$((npatch + 1))
+        (
+            cd "$wingamedir"
+            winpath="$(find . -type f -name "$base" -print0 | readline_null_terminated)"
+            cd "$linuxgamedir"
+            linuxpath="$(find . -type f -name "$base" -print0 | readline_null_terminated)"
+            install -d "$(dirname "$patchdir/$linuxpath")"
+            xdelta3 -e -s "$wingamedir/$winpath" "$linuxgamedir/$linuxpath" "$patchdir/$linuxpath"
+
+            # Save the paths of patched files to a file. It will be used to track which files do not need
+            # to be stored in the delta archive.
+            printf '%s\0' "$winpath" >> "$md5dir/wpatches.path"
+            printf '%s\0' "$linuxpath" >> "$md5dir/lpatches.path"
+        )
+    done < <( sort -z /proc/self/fd/10 /proc/self/fd/11 \
+        10< <(sed -z 's|^.*/||' "$md5dir/windows.path" | sort -zu) \
+        11< <(sed -z 's|^.*/||' "$md5dir/linux.path" | sort -zu) |
+        uniq -zd)
+
     # Let's filter some corner cases that make a delta script useless.
     # We don't want to go head if:
     #  1) the two folders are identical: clearly there is no advantage is a script
     #     that has nothing to add, remove or just rename;
-    #  2) no files are common: we have just two completely unrelated folders
+    #  2) no files are common or patchable: we have just two completely unrelated folders
     #     and can just keep their installers
     local ncommon
     ncommon="$(wc -l "$md5dir/common.md5" | cut -d ' ' -f 1)"
-    info "There are $ncommon common files betwwen the two game releases."
-    [ "$ncommon" -eq 0 ] && fatal $ERR_NOCOMMONFILES "Not producing a delta script with no common files."
+    info "There are $ncommon common files between the two game releases and $npatch patchable files."
+    [ "$ncommon" -eq 0 -a "$npatch" -eq 0 ] && fatal $ERR_NOCOMMONFILES "Not producing a delta script with no common or patchable files."
     if cmp -s "$md5dir/windows.md5" "$md5dir/linux.md5"; then
         fatal $ERR_ALLCOMMONFILES "The folders are identical! You don't need a delta script."
     fi
@@ -309,6 +344,20 @@ step_compute_md5() {
 
 step_create_script() {
     info "Creating restore script; note that compressing Linux-only files may take a while"
+
+    # Create a temporary directory name that is unique in both $wingamedir and $linuxgamedir
+    local stagingdir
+    while [ -e "$linuxgamedir/$stagingdir" ]; do
+        stagingdir="$(basename "$(mktemp -d -q -u -p "$wingamedir")")"
+    done
+    escstagingdir="$(printf %q "$stagingdir")"
+
+    # Create a temporary directory name that is unique in both $wingamedir and $linuxgamedir
+    local stagingpatchdir
+    while [ -e "$linuxgamedir/$stagingpatchdir" ]; do
+        stagingpatchdir="$(basename "$(mktemp -d -q -u -p "$wingamedir")")"
+    done
+    escstagingpatchdir="$(printf %q "$stagingpatchdir")"
 
     {
         # Script header with helper functions
@@ -336,7 +385,10 @@ remove_file() {
 }
 
 extract() {
-    dd skip='"$size_placeholder"' iflag=skip_bytes if="$0" status=none | tar -x ${GOGDIFF_VERBOSE:+-v} '"$compressopts"' -f-
+    local workdir
+    workdir="$1"
+    dd skip='"$size_placeholder"' iflag=skip_bytes if="$0" status=none |
+        tar -x ${GOGDIFF_VERBOSE:+-v} ${workdir:+-C "$workdir"} '"$compressopts"' -f-
 }
 
 verify() {
@@ -347,20 +399,20 @@ verify() {
     fi
 }
 
+patch_file() {
+    install -d '"$escstagingpatchdir"'/"$(dirname "$2")"
+    xdelta3 -d -s "$1" '"$escstagingdir"'/"$2" '"$escstagingpatchdir"'/"$2"
+}
+
 if [ -n "$GOGDIFF_EXTRACTONLY" ]; then
     extract
     exit
 fi
+
+mkdir -p '"$escstagingdir"'
+mkdir -p '"$escstagingpatchdir"'
 '
 
-        # Create a temporary directory name that is unique in both $wingamedir and $linuxgamedir
-        local stagingdir
-        while [ -e "$linuxgamedir/$stagingdir" ]; do
-            stagingdir="$(basename "$(mktemp -d -q -u -p "$wingamedir")")"
-        done
-
-        # Delete Windows-only files
-        xargs -0 -r -I'{}' printf 'remove_file %q\n' '{}' < "$md5dir/windows.path"
 
         # Generate code that renames common files from their Windows name to the Linux name.
         # A file with a given MD5 may appear multiple times on both systems.
@@ -369,27 +421,43 @@ fi
         while read -r common; do
             {
                 # The first Windows pathname is simply moved to the correponding first Linux pathname
-                wpath="$(readline_null_terminated <&11 | xargs -0 printf %q)"
-                lpath="$(readline_null_terminated <&12 | xargs -0 printf %q)"
-                printf 'move_file %s %q/%s\n' "$wpath" "$stagingdir" "$lpath"
+                wpath="$(readline_null_terminated <&11)"
+                lpath="$(readline_null_terminated <&12)"
+                printf 'move_file %q %q/%q\n' "$wpath" "$stagingdir" "$lpath"
                 
                 # All other Windows pathnames for the same MD5 are deleted
                 xargs -0 -r -I'{}' printf 'remove_file %q\n' '{}' <&11
 
                 # All other Linux pathnames for the same MD5 are symlinked or copied
-                xargs -0 -r -I'{}' printf 'copy_file %q/%s %q/%q\n' "$stagingdir" "$lpath" "$stagingdir" '{}' <&12
+                xargs -0 -r -I'{}' printf 'copy_file %q/%q %q/%q\n' "$stagingdir" "$lpath" "$stagingdir" '{}' <&12
             } 11< <(md5_find_all_matches "$common" "$md5dir/windows.md5") 12< <(md5_find_all_matches "$common" "$md5dir/linux.md5") 
         done < "$md5dir/common.md5"
+
+        # Unpack the Linux only files, which are stored in a compressed tar just after the code
+        # They are placed into the staging directory
+        printf 'extract %q\n' "$stagingdir"
+
+        while :; do
+            wpath="$(readline_null_terminated <&11)"
+            lpath="$(readline_null_terminated <&12)"
+            [ -z "$wpath" ] && break
+            printf 'patch_file %q %q\n' "$wpath" "$lpath"
+        done 11< "$md5dir/wpatches.path" 12< "$md5dir/lpatches.path" 
+
+        # Delete Windows-only files
+        xargs -0 -r -I'{}' printf 'remove_file %q\n' '{}' < "$md5dir/windows.path"
 
         # Delete folders that are now empty
         printf 'find . -type d -empty -delete\n'
 
-        # Move files from the staging directory to the PWD, since there can no longer be conflicts
-        printf 'find %q -mindepth 1 -maxdepth 1 -print0 | xargs -0 -r mv ${GOGDIFF_VERBOSE:+-v} -t .\n' "$stagingdir"
+        # Move files from the staging patch directory to the PWD, since there can no longer be conflicts
+        printf '(cd %q; find . -mindepth 1 -maxdepth 1 -print0 | xargs -I"{}" -0 -r mv -t .. "{}")\n' "$stagingdir"
         printf 'rm ${GOGDIFF_VERBOSE:+-v} -rf %q\n' "$stagingdir" 
 
-        # Unpack the Linux only files, which are stored in a compressed tar just after the code
-        printf 'extract\n'
+        # Move files from the staging patch directory to the PWD, overwriting the patches with the same names
+        # Here we take advantage of the fact that the target file already exists.
+        printf '(cd %q; find . -type f -print0 | xargs -I"{}" -0 -r mv "{}" "../{}")\n' "$stagingpatchdir"
+        printf 'rm ${GOGDIFF_VERBOSE:+-v} -rf %q\n' "$stagingpatchdir" 
 
         # After unpacking, perform MD5 checks on the final files
         # We translate the zero-terminated format to the line-oriented escaped format, since
@@ -406,12 +474,18 @@ fi
     # We are done with $script, replace the header size placeholder
     sed -i '/^\s*dd skip=/ s/'"$size_placeholder"/"$(printf %-${#size_placeholder}d "$(stat -c %s "$script")")"/ "$script"
 
-    # Append Linux-only files
+    # Append Linux-only files and patches while skipping the files from which the patches were made
     # We should also save symlinks, as they were not hashed and do not appear in linux.path
+    # Patch files are taken from the symlink, so that they all contain a fixed prefix which
+    # cab easily be stripped off with sed and which by construction cannot will not contain chars
+    # that need escaping
     (
         cd "$linuxgamedir"
-        { find . -type l -print0; cat "$md5dir/linux.path"; } |
-            tar -c $compressopts --verbatim-files-from --null -T- --owner=root:0 --group=root:0
+        { 
+            find . -type l -print0
+            sort -z "$md5dir/linux.path" "$md5dir/lpatches.path" | uniq -zu
+            find "$patchsymlink" -type f -print0
+        } | tar -c $compressopts -P --transform='s|^'"$patchsymlink"'/||' --null -T- --owner=root:0 --group=root:0
     ) >> "$script"
 
     chmod a+x "$script"
