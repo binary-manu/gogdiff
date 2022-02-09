@@ -125,14 +125,49 @@ md5_find_all_matches() {
     sed -z -n 's/^'"$1"' \*//ip' "$2"
 }
 
-# Reads a single line from stdin and prints it to stdout, where "lines" are
+# Given two files containeing null-temirnated pathnames, the function will:
+#  - extract the basename of each pathname;
+#  - for each file, keep only basenames which appear just once;
+#  - then keep only basenames which appear in both files.
+find_common_unique_basenames() {
+    local w
+    local l
+    w="${1:?"BUG! Missing parameter"}"
+    l="${2:?"BUG! Missing parameter"}"
+    # The LC_CTYPE override below forces sed to use a single byte
+    # character set, so that even pathnames which contain byte sequences
+    # that are invalid in UTF-8 can be matched by .
+    # This is mentioned in the GNU sed manual for the "z" command.
+    # Consider this example which starts with a bad UTF-8 code unit (a leading 10xxxxxx):
+
+    #   $ locale -c charmap
+    #   LC_CTYPE
+    #   UTF-8
+    #
+    #   # sed won't match this because it ignores the first byte, since it cannot
+    #   # make a valid UTF-8 codepoint from it
+    #   $ printf '\x81\x20' | sed -n '/../p' | od -tx1
+    #   0000000
+    #   
+    #   # Now we won't use UTF-8 so the "bad byte" is matched individually
+    #   $ printf '\x81\x20' | LC_CTYPE=C sed -n '/../p' | od -tx1
+    #   0000000 81 20
+    #   0000002
+    sort -z /proc/self/fd/10 /proc/self/fd/11 \
+        10< <(LC_CTYPE=C sed -z 's|^.*/||' "$w" | sort -zu) \
+        11< <(LC_CTYPE=C sed -z 's|^.*/||' "$l" | sort -zu) |
+    uniq -zd
+}
+
+# Reads a single line from stdin and places it into a variable, where "lines" are
 # actually terminated by \0 rather than \n.  It looks trivial, but head -z -n1
 # buffers its input, making it infeasible when reading from a stream, since it
 # "eats" lots of lines instead of just one.
-# sed with unbuffered input (-u) seems the way, we just tell it to exit after one iteration.
+# sed with unbuffered input (-u) seems the way, we just tell it to exit after
+# one iteration. The \0 at the end is replaced by \n that will be stripped
+# by output substitution.
 readline_null_terminated() {
-    sed -z -u q | tr -d '\0'
-    printf '\n'
+    eval "$1=$(sed -z -u q | xargs -0 -r printf %q)"
 }
 
 ###############################
@@ -214,23 +249,32 @@ fi
 wininstaller="$(realpath -e "$wininstaller")"
 linuxinstaller="$(realpath -e "$linuxinstaller")"
 outputdir="$(realpath -m "$outputdir")"
-# Important rules:
-# folder base names should only contains chars that can go in a sed
-# basic regexp unescaped, so avoid things like dots. This rule does not apply to files.
+# Important rule:
+# folder base names should only contains chars that can go in a sed basic
+# regexp unescaped, so avoid things like dots.
 md5dir="$outputdir/digests"
 patchdir="$outputdir/patches"
 windir="$outputdir/windows"
 linuxdir="$outputdir/linux"
 junkdir="$outputdir/junk"
+
 script="$outputdir/gogdiff_delta.sh"
-# The Linux installer doesn't like spaces in the destination folder path, so
-# we create a symlink under /tmp that points to the installation directory and
-# remove it on exit. The link should again be usable in a sed expression without escaping.
+
+# The Linux installer doesn't like spaces in the destination folder path, so we
+# create a symlink under /tmp that points to the installation directory and
+# remove it on exit. The link should again be usable in a sed expression
+# without escaping. Slash will not be used as the character to separate the
+# regexp and the replacement and need not be escaped.
 outputsymlink="$(mktemp -p /tmp tmpXXXXXXXXXX)"
 ln -sf "$outputdir" "$outputsymlink"
+
 # Folder for setup-generated files we want to throw away
 junksymlink="$outputsymlink/$(basename "$junkdir")"
 linuxsymlink="$outputsymlink/$(basename "$linuxdir")"
+
+# This link will be used to access patch files using a fixed, predictable
+# pathname prefix that can go in a sed replacement without escaping. It is used
+# when creating the archive with Linux files.
 patchsymlink="$outputsymlink/$(basename "$patchdir")"
 
 if [ -d "$wininstaller" ]; then
@@ -252,7 +296,7 @@ fi
 info "Linux game files will be fetched from $linuxgamedir"
 
 step_windows_installer() {
-    ## Run the Windows installer
+    # Run the Windows installer
     info "Launching the Windows installer, please DON'T change the installation folder and DON'T run the game"
     rm -rf "$windir"
     mkdir -p "$windir"
@@ -298,34 +342,41 @@ step_compute_md5() {
     # Extract the set of common MD5s between Linux and Windows
     md5_intersection "$md5dir/windows.md5" "$md5dir/linux.md5" > "$md5dir/common.md5"
 
-    # Look for file with the same basename, which could be used to compute patches with
-    # xdelta3
+    # Look for files that could be used to compute patches with xdelta3.
+    # We only consider files that:
+    #   - have identical basenames in both Linux and Windows;
+    #   - the basename must be unique within the Windows and Linux installations
+    #     individually, otherwise it would be ambiguous which file to choose from
+    #     either side.
     local npatch
     npatch=0
+    # This files must exists, even if empty, as the script uses them later on
     : > "$md5dir/wpatches.path"
     : > "$md5dir/lpatches.path"
-    printf '%s\0' "$linuxpath" >> "$md5dir/lpatches.path"
     while :; do
-        base="$(readline_null_terminated)"
+        local base
+        readline_null_terminated base
         [ -z "$base" ] && break
         npatch=$((npatch + 1))
         (
             cd "$wingamedir"
-            winpath="$(find . -type f -name "$base" -print0 | readline_null_terminated)"
+            local winpath
+            readline_null_terminated winpath < <(find . -type f -name "$base" -print0)
+
             cd "$linuxgamedir"
-            linuxpath="$(find . -type f -name "$base" -print0 | readline_null_terminated)"
-            install -d "$(dirname "$patchdir/$linuxpath")"
-            xdelta3 -e -s "$wingamedir/$winpath" "$linuxgamedir/$linuxpath" "$patchdir/$linuxpath"
+            local linuxpath
+            readline_null_terminated linuxpath < <(find . -type f -name "$base" -print0)
+
+            local pdir="$patchdir/$linuxpath"
+            install -d "${pdir%/*}"
+            xdelta3 -e -s "$wingamedir/$winpath" "$linuxgamedir/$linuxpath" "$pdir"
 
             # Save the paths of patched files to a file. It will be used to track which files do not need
             # to be stored in the delta archive.
             printf '%s\0' "$winpath" >> "$md5dir/wpatches.path"
             printf '%s\0' "$linuxpath" >> "$md5dir/lpatches.path"
         )
-    done < <( sort -z /proc/self/fd/10 /proc/self/fd/11 \
-        10< <(sed -z 's|^.*/||' "$md5dir/windows.path" | sort -zu) \
-        11< <(sed -z 's|^.*/||' "$md5dir/linux.path" | sort -zu) |
-        uniq -zd)
+    done < <(find_common_unique_basenames "$md5dir/windows.path" "$md5dir/linux.path")
 
     # Let's filter some corner cases that make a delta script useless.
     # We don't want to go head if:
@@ -350,14 +401,12 @@ step_create_script() {
     while [ -e "$linuxgamedir/$stagingdir" ]; do
         stagingdir="$(basename "$(mktemp -d -q -u -p "$wingamedir")")"
     done
-    escstagingdir="$(printf %q "$stagingdir")"
 
     # Create a temporary directory name that is unique in both $wingamedir and $linuxgamedir
     local stagingpatchdir
     while [ -e "$linuxgamedir/$stagingpatchdir" ]; do
         stagingpatchdir="$(basename "$(mktemp -d -q -u -p "$wingamedir")")"
     done
-    escstagingpatchdir="$(printf %q "$stagingpatchdir")"
 
     {
         # Script header with helper functions
@@ -367,12 +416,12 @@ step_create_script() {
 set -e
 
 move_file() {
-    install -d "$(dirname "$2")"
+    install -d "${2%/*}"
     mv ${GOGDIFF_VERBOSE:+-v} -n "$1" "$2"
 }
 
 copy_file() {
-    install -d "$(dirname "$2")"
+    install -d "${2%/*}"
     if [ -n "$GOGDIFF_NOSYMLINKS" ]; then
         cp ${GOGDIFF_VERBOSE:+-v} "$1" "$2"
     else
@@ -400,8 +449,10 @@ verify() {
 }
 
 patch_file() {
-    install -d '"$escstagingpatchdir"'/"$(dirname "$2")"
-    xdelta3 -d -s "$1" '"$escstagingdir"'/"$2" '"$escstagingpatchdir"'/"$2"
+    local pdir
+    pdir='$stagingpatchdir'/"$2"
+    install -d "${pdir%/*}"
+    xdelta3 -d -s "$1" '$stagingdir'/"$2" "$pdir"
 }
 
 if [ -n "$GOGDIFF_EXTRACTONLY" ]; then
@@ -409,8 +460,8 @@ if [ -n "$GOGDIFF_EXTRACTONLY" ]; then
     exit
 fi
 
-mkdir -p '"$escstagingdir"'
-mkdir -p '"$escstagingpatchdir"'
+mkdir -p '$stagingdir'
+mkdir -p '$stagingpatchdir'
 '
 
 
@@ -421,8 +472,8 @@ mkdir -p '"$escstagingpatchdir"'
         while read -r common; do
             {
                 # The first Windows pathname is simply moved to the correponding first Linux pathname
-                wpath="$(readline_null_terminated <&11)"
-                lpath="$(readline_null_terminated <&12)"
+                readline_null_terminated wpath <&11
+                readline_null_terminated lpath <&12
                 printf 'move_file %q %q/%q\n' "$wpath" "$stagingdir" "$lpath"
                 
                 # All other Windows pathnames for the same MD5 are deleted
@@ -438,8 +489,8 @@ mkdir -p '"$escstagingpatchdir"'
         printf 'extract %q\n' "$stagingdir"
 
         while :; do
-            wpath="$(readline_null_terminated <&11)"
-            lpath="$(readline_null_terminated <&12)"
+            readline_null_terminated wpath <&11
+            readline_null_terminated lpath <&12
             [ -z "$wpath" ] && break
             printf 'patch_file %q %q\n' "$wpath" "$lpath"
         done 11< "$md5dir/wpatches.path" 12< "$md5dir/lpatches.path" 
@@ -474,10 +525,10 @@ mkdir -p '"$escstagingpatchdir"'
     # We are done with $script, replace the header size placeholder
     sed -i '/^\s*dd skip=/ s/'"$size_placeholder"/"$(printf %-${#size_placeholder}d "$(stat -c %s "$script")")"/ "$script"
 
-    # Append Linux-only files and patches while skipping the files from which the patches were made
+    # Append Linux-only files and patches while skipping the files from which the patches were made.
     # We should also save symlinks, as they were not hashed and do not appear in linux.path
     # Patch files are taken from the symlink, so that they all contain a fixed prefix which
-    # cab easily be stripped off with sed and which by construction cannot will not contain chars
+    # can easily be stripped off with sed and which by construction cannot contain chars
     # that need escaping
     (
         cd "$linuxgamedir"
@@ -485,7 +536,7 @@ mkdir -p '"$escstagingpatchdir"'
             find . -type l -print0
             sort -z "$md5dir/linux.path" "$md5dir/lpatches.path" | uniq -zu
             find "$patchsymlink" -type f -print0
-        } | tar -c $compressopts -P --transform='s|^'"$patchsymlink"'/||' --null -T- --owner=root:0 --group=root:0
+        } | tar -c $compressopts -P --transform='s|^'"$patchsymlink"'/|./|' --null -T- --owner=root:0 --group=root:0
     ) >> "$script"
 
     chmod a+x "$script"
