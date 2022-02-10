@@ -164,9 +164,9 @@ find_common_unique_basenames() {
 # buffers its input, making it infeasible when reading from a stream, since it
 # "eats" lots of lines instead of just one.
 # sed with unbuffered input (-u) seems the way, we just tell it to exit after
-# one iteration. The \0 at the end is replaced by \n that will be stripped
-# by output substitution.
+# one iteration.
 readline_null_terminated() {
+    : "${1:?"BUG! Missing parameter"}"
     eval "$1=$(sed -z -u q | xargs -0 -r printf %q)"
 }
 
@@ -387,7 +387,7 @@ step_compute_md5() {
     local ncommon
     ncommon="$(wc -l "$md5dir/common.md5" | cut -d ' ' -f 1)"
     info "There are $ncommon common files between the two game releases and $npatch patchable files."
-    [ "$ncommon" -eq 0 -a "$npatch" -eq 0 ] && fatal $ERR_NOCOMMONFILES "Not producing a delta script with no common or patchable files."
+    [ "$ncommon" -eq 0 ] && [ "$npatch" -eq 0 ] && fatal $ERR_NOCOMMONFILES "Not producing a delta script with no common or patchable files."
     if cmp -s "$md5dir/windows.md5" "$md5dir/linux.md5"; then
         fatal $ERR_ALLCOMMONFILES "The folders are identical! You don't need a delta script."
     fi
@@ -450,9 +450,13 @@ verify() {
 
 patch_file() {
     local pdir
-    pdir='$stagingpatchdir'/"$2"
+    pdir='"$stagingpatchdir"'/"$2"
     install -d "${pdir%/*}"
-    xdelta3 -d -s "$1" '$stagingdir'/"$2" "$pdir"
+    xdelta3 -d -s "$1" '"$stagingdir"'/"$2" "$pdir"
+}
+
+remove_folder() {
+    rm ${GOGDIFF_VERBOSE:+-v} -rf "$1"
 }
 
 if [ -n "$GOGDIFF_EXTRACTONLY" ]; then
@@ -460,8 +464,8 @@ if [ -n "$GOGDIFF_EXTRACTONLY" ]; then
     exit
 fi
 
-mkdir -p '$stagingdir'
-mkdir -p '$stagingpatchdir'
+mkdir -p '"$stagingdir"'
+mkdir -p '"$stagingpatchdir"'
 '
 
 
@@ -503,12 +507,12 @@ mkdir -p '$stagingpatchdir'
 
         # Move files from the staging patch directory to the PWD, since there can no longer be conflicts
         printf '(cd %q; find . -mindepth 1 -maxdepth 1 -print0 | xargs -I"{}" -0 -r mv -t .. "{}")\n' "$stagingdir"
-        printf 'rm ${GOGDIFF_VERBOSE:+-v} -rf %q\n' "$stagingdir" 
+        printf 'remove_folder %q\n' "$stagingdir" 
 
         # Move files from the staging patch directory to the PWD, overwriting the patches with the same names
         # Here we take advantage of the fact that the target file already exists.
         printf '(cd %q; find . -type f -print0 | xargs -I"{}" -0 -r mv "{}" "../{}")\n' "$stagingpatchdir"
-        printf 'rm ${GOGDIFF_VERBOSE:+-v} -rf %q\n' "$stagingpatchdir" 
+        printf 'remove_folder %q\n' "$stagingpatchdir" 
 
         # After unpacking, perform MD5 checks on the final files
         # We translate the zero-terminated format to the line-oriented escaped format, since
