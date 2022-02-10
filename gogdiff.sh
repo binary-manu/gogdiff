@@ -411,7 +411,7 @@ step_create_script() {
     {
         # Script header with helper functions
         # shellcheck disable=SC2016 # variables should be expanded in the script, not here
-        printf "%s\n" '#!/bin/sh
+        printf "%s\n" '#!/usr/bin/env bash
 
 set -e
 
@@ -501,9 +501,6 @@ mkdir -p '"$stagingpatchdir"'
 
         # Delete Windows-only files
         xargs -0 -r -I'{}' printf 'remove_file %q\n' '{}' < "$md5dir/windows.path"
-
-        # Delete folders that are now empty
-        printf 'find . -type d -empty -delete\n'
 
         # Move files from the staging patch directory to the PWD, since there can no longer be conflicts
         printf '(cd %q; find . -mindepth 1 -maxdepth 1 -print0 | xargs -I"{}" -0 -r mv -t .. "{}")\n' "$stagingdir"
