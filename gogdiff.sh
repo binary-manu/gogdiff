@@ -399,13 +399,13 @@ step_create_script() {
     # Create a temporary directory name that is unique in both $wingamedir and $linuxgamedir
     local stagingdir
     while [ -e "$linuxgamedir/$stagingdir" ]; do
-        stagingdir="$(basename "$(mktemp -d -q -u -p "$wingamedir")")"
+        stagingdir="$(basename "$(mktemp -d -q -u -p "$wingamedir" tmpXXXXXXXXXX)")"
     done
 
     # Create a temporary directory name that is unique in both $wingamedir and $linuxgamedir
     local stagingpatchdir
     while [ -e "$linuxgamedir/$stagingpatchdir" ]; do
-        stagingpatchdir="$(basename "$(mktemp -d -q -u -p "$wingamedir")")"
+        stagingpatchdir="$(basename "$(mktemp -d -q -u -p "$wingamedir" tmpXXXXXXXXXX)")"
     done
 
     {
@@ -502,6 +502,9 @@ mkdir -p '"$stagingpatchdir"'
         # Delete Windows-only files
         xargs -0 -r -I'{}' printf 'remove_file %q\n' '{}' < "$md5dir/windows.path"
 
+        # Delete folders that are now empty
+        printf 'find . -type d -empty -regextype posix-extended ! -regex %q -delete\n' '\./('"$stagingdir"'|'"$stagingpatchdir"')(/.*)?'
+
         # Move files from the staging directory to the PWD, since there can no longer be conflicts
         printf '(cd %q; find . -mindepth 1 -maxdepth 1 -print0 | xargs -I"{}" -0 -r mv -t .. "{}")\n' "$stagingdir"
         printf 'remove_folder %q\n' "$stagingdir" 
@@ -510,9 +513,6 @@ mkdir -p '"$stagingpatchdir"'
         # Here we take advantage of the fact that the target file already exists.
         printf '(cd %q; find . -type f -print0 | xargs -I"{}" -0 -r mv "{}" "../{}")\n' "$stagingpatchdir"
         printf 'remove_folder %q\n' "$stagingpatchdir" 
-
-         # Delete folders that are now empty
-        printf 'find . -type d -empty -delete\n'
 
         # After unpacking, perform MD5 checks on the final files
         # We translate the zero-terminated format to the line-oriented escaped format, since
@@ -530,14 +530,15 @@ mkdir -p '"$stagingpatchdir"'
     sed -i '/^\s*dd skip=/ s/'"$size_placeholder"/"$(printf %-${#size_placeholder}d "$(stat -c %s "$script")")"/ "$script"
 
     # Append Linux-only files and patches while skipping the files from which the patches were made.
-    # We should also save symlinks, as they were not hashed and do not appear in linux.path
+    # We should also save symlinks, as they were not hashed and do not appear in linux.path;
+    # the same goes for empty Linux folders.
     # Patch files are taken from the symlink, so that they all contain a fixed prefix which
     # can easily be stripped off with sed and which by construction cannot contain chars
     # that need escaping
     (
         cd "$linuxgamedir"
         { 
-            find . -type l -print0
+            find . \( -type l -o -type d -empty \) -print0
             sort -z "$md5dir/linux.path" "$md5dir/lpatches.path" | uniq -zu
             find "$patchsymlink" -type f -print0
         } | tar -c $compressopts -P --transform='s|^'"$patchsymlink"'/|./|' --null -T- --owner=root:0 --group=root:0
