@@ -502,7 +502,7 @@ mkdir -p '"$stagingpatchdir"'
         # Delete Windows-only files
         xargs -0 -r -I'{}' printf 'remove_file %q\n' '{}' < "$md5dir/windows.path"
 
-        # Move files from the staging patch directory to the PWD, since there can no longer be conflicts
+        # Move files from the staging directory to the PWD, since there can no longer be conflicts
         printf '(cd %q; find . -mindepth 1 -maxdepth 1 -print0 | xargs -I"{}" -0 -r mv -t .. "{}")\n' "$stagingdir"
         printf 'remove_folder %q\n' "$stagingdir" 
 
@@ -510,6 +510,9 @@ mkdir -p '"$stagingpatchdir"'
         # Here we take advantage of the fact that the target file already exists.
         printf '(cd %q; find . -type f -print0 | xargs -I"{}" -0 -r mv "{}" "../{}")\n' "$stagingpatchdir"
         printf 'remove_folder %q\n' "$stagingpatchdir" 
+
+         # Delete folders that are now empty
+        printf 'find . -type d -empty -delete\n'
 
         # After unpacking, perform MD5 checks on the final files
         # We translate the zero-terminated format to the line-oriented escaped format, since
