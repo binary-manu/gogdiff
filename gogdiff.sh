@@ -2,6 +2,8 @@
 
 set -eo pipefail
 
+export LC_CTYPE="C"
+
 ###############################
 ###### Logging functions ######
 ###############################
@@ -125,40 +127,6 @@ md5_find_all_matches() {
     sed -z -n 's/^'"$1"' \*//ip' "$2"
 }
 
-# Given two files containeing null-temirnated pathnames, the function will:
-#  - extract the basename of each pathname;
-#  - for each file, keep only basenames which appear just once;
-#  - then keep only basenames which appear in both files.
-find_common_unique_basenames() {
-    local w
-    local l
-    w="${1:?"BUG! Missing parameter"}"
-    l="${2:?"BUG! Missing parameter"}"
-    # The LC_CTYPE override below forces sed to use a single byte
-    # character set, so that even pathnames which contain byte sequences
-    # that are invalid in UTF-8 can be matched by .
-    # This is mentioned in the GNU sed manual for the "z" command.
-    # Consider this example which starts with a bad UTF-8 code unit (a leading 10xxxxxx):
-
-    #   $ locale -c charmap
-    #   LC_CTYPE
-    #   UTF-8
-    #
-    #   # sed won't match this because it ignores the first byte, since it cannot
-    #   # make a valid UTF-8 codepoint from it
-    #   $ printf '\x81\x20' | sed -n '/../p' | od -tx1
-    #   0000000
-    #   
-    #   # Now we won't use UTF-8 so the "bad byte" is matched individually
-    #   $ printf '\x81\x20' | LC_CTYPE=C sed -n '/../p' | od -tx1
-    #   0000000 81 20
-    #   0000002
-    sort -z /proc/self/fd/10 /proc/self/fd/11 \
-        10< <(LC_CTYPE=C sed -z 's|^.*/||' "$w" | sort -zu) \
-        11< <(LC_CTYPE=C sed -z 's|^.*/||' "$l" | sort -zu) |
-    uniq -zd
-}
-
 # Reads a single line from stdin and places it into a variable, where "lines" are
 # actually terminated by \0 rather than \n.  It looks trivial, but head -z -n1
 # buffers its input, making it infeasible when reading from a stream, since it
@@ -253,6 +221,7 @@ outputdir="$(realpath -m "$outputdir")"
 # folder base names should only contains chars that can go in a sed basic
 # regexp unescaped, so avoid things like dots.
 md5dir="$outputdir/digests"
+deltadir="$outputdir/delta"
 patchdir="$outputdir/patches"
 windir="$outputdir/windows"
 linuxdir="$outputdir/linux"
@@ -330,8 +299,8 @@ step_compute_md5() {
     info "The Windows installation contains $(count_files "$wingamedir") files"
     info "The Linux installation contains $(count_files "$linuxgamedir") files"
 
-    rm -rf "$md5dir" "$patchdir"
-    mkdir -p "$md5dir" "$patchdir"
+    rm -rf "$md5dir" "$patchdir" "$deltadir"
+    mkdir -p "$md5dir" "$patchdir" "$deltadir"
 
     write_sorted_md5sums "$wingamedir" > "$md5dir/windows.md5"
     write_sorted_md5sums "$linuxgamedir" > "$md5dir/linux.md5"
@@ -348,35 +317,46 @@ step_compute_md5() {
     #   - the basename must be unique within the Windows and Linux installations
     #     individually, otherwise it would be ambiguous which file to choose from
     #     either side.
-    local npatch
-    npatch=0
-    # This files must exists, even if empty, as the script uses them later on
+    # These files must exists, even if empty, as the script uses them later on
     : > "$md5dir/wpatches.path"
     : > "$md5dir/lpatches.path"
     while :; do
+        local path
+        readline_null_terminated path
+        [ -z "$path" ] && break
         local base
-        readline_null_terminated base
-        [ -z "$base" ] && break
-        npatch=$((npatch + 1))
-        (
-            cd "$wingamedir"
-            local winpath
-            readline_null_terminated winpath < <(find . -type f -name "$base" -print0)
+        base="${path##*/}"
+        local dir
+        readline_null_terminated dir < <(printf '%s' "$path" | sed -z 's/.\{'"${#base}"'\}$//')
+        printf '%s\0' "$dir" >> "$deltadir/$base"
+    done < <(cat "$md5dir/windows.path" "$md5dir/linux.path")
 
-            cd "$linuxgamedir"
-            local linuxpath
-            readline_null_terminated linuxpath < <(find . -type f -name "$base" -print0)
+    local npatch
+    npatch=0
+    while :; do
+        local dirlist
+        readline_null_terminated dirlist
+        [ -z "$dirlist" ] && break
+        local base
+        base="${dirlist##*/}"
 
-            local pdir="$patchdir/$linuxpath"
-            install -d "${pdir%/*}"
-            xdelta3 -e -s "$wingamedir/$winpath" "$linuxgamedir/$linuxpath" "$pdir"
+        local wpath lpath extrapath
+        {
+            readline_null_terminated wpath
+            readline_null_terminated lpath
+            readline_null_terminated extrapath
+            if [ -z "$extrapath" ] && [ -n "$wpath" ] && [ -n "$lpath" ] &&
+                [ -f "$wingamedir/$wpath/$base" ] && [ -f "$linuxgamedir/$lpath/$base" ]; then
+                npatch="$((npatch + 1))" 
+                local pdir="$patchdir/$lpath"
+                install -d "$pdir"
+                xdelta3 -e -s "$wingamedir/$wpath/$base" "$linuxgamedir/$lpath/$base" "$pdir/$base"
+                printf '%s\0' "$wpath/$base" >> "$md5dir/wpatches.path"
+                printf '%s\0' "$lpath/$base" >> "$md5dir/lpatches.path"
+            fi
+        } < "$dirlist"
+    done < <(find "$deltadir" -type f -print0)
 
-            # Save the paths of patched files to a file. It will be used to track which files do not need
-            # to be stored in the delta archive.
-            printf '%s\0' "$winpath" >> "$md5dir/wpatches.path"
-            printf '%s\0' "$linuxpath" >> "$md5dir/lpatches.path"
-        )
-    done < <(find_common_unique_basenames "$md5dir/windows.path" "$md5dir/linux.path")
 
     # Let's filter some corner cases that make a delta script useless.
     # We don't want to go head if:
