@@ -1,1 +1,1 @@
-multiple files to patch with different dirnames
+ambiguous Linux patchable files
