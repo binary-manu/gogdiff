@@ -499,7 +499,7 @@ mkdir -p '"$stagingpatchdir"'
         # md5sum does not allow -z and -c at the same time.
         # shellcheck disable=SC2016 # variables should be expanded in the script, not here
         printf '%s\n' '[ -z "$GOGDIFF_SKIPDIGESTS" ] && verify << EOF'
-        sed -z -E '/[\n\r]/ { s/\\/\\\\/g; s/\n/\\n/g; s/\r/\\r/g; s/(.*)/\\\1/; }' "$md5dir/linux.md5" | tr '\0' '\n'
+        sed -z -E '/[\n\r\]/ { s/\\/\\\\/g; s/\n/\\n/g; s/\r/\\r/g; s/(.*)/\\\1/; }' "$md5dir/linux.md5" | tr '\0' '\n'
         printf 'EOF\n'
 
         # Ensure we don't try to execute the tar at the end
