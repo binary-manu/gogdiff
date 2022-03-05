@@ -437,6 +437,7 @@ patch_file() {
     local pdir
     pdir='"$stagingpatchdir"'/"$2"
     install -d "${pdir%/*}"
+    [ -n "$GOGDIFF_VERBOSE" ] && printf "Applying patch for %q\n" "$2"
     xdelta3 -d -s "$1" '"$stagingdir"'/"$2" "$pdir"
 }
 
