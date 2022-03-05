@@ -2,8 +2,6 @@
 
 set -eo pipefail
 
-export LC_CTYPE="C"
-
 ###############################
 ###### Logging functions ######
 ###############################
@@ -82,6 +80,10 @@ declare -r ERR_ALLCOMMONFILES=6
 ########## Utilities ##########
 ###############################
 
+csed() {
+    env LC_CTYPE=C sed "$@"
+}
+
 # Placeholder for delta script header size. Will be replaced by the mount of
 # script data before the compressed archive. Must be at leass as long as the decimal
 # representation of the size of header code.
@@ -109,7 +111,7 @@ write_sorted_md5sums() {
 md5_difference() {
     : "${1:?"BUG! Missing parameter"}"
     : "${2:?"BUG! Missing parameter"}"
-    join -z -i -j 1 -t ' ' -v 1 "$1" "$2" | sed -z 's/^[^*]*\*//'
+    join -z -i -j 1 -t ' ' -v 1 "$1" "$2" | csed -z 's/^[^*]*\*//'
 }
 
 # Given two files $1 and $2 produced by "md5sum -b -z" sorted by hash, compute their intersection,
@@ -124,7 +126,7 @@ md5_intersection() {
 md5_find_all_matches() {
     : "${1:?"BUG! Missing parameter"}"
     : "${2:?"BUG! Missing parameter"}"
-    sed -z -n 's/^'"$1"' \*//ip' "$2"
+    csed -z -n 's/^'"$1"' \*//ip' "$2"
 }
 
 # Reads a single line from stdin and places it into a variable, where "lines" are
@@ -135,7 +137,7 @@ md5_find_all_matches() {
 # one iteration.
 readline_null_terminated() {
     : "${1:?"BUG! Missing parameter"}"
-    eval "$1=$(sed -z -u q | xargs -0 -r printf %q)"
+    eval "$1=$(csed -z -u q | xargs -0 -r printf %q)"
 }
 
 ###############################
@@ -328,7 +330,7 @@ step_compute_md5() {
         base="${path##*/}"
         local dir
         # IMPORTANT: every dirname placed in "dir" has a / at the end
-        readline_null_terminated dir < <(printf '%s' "$path" | sed -z 's/.\{'"${#base}"'\}$//')
+        readline_null_terminated dir < <(printf '%s' "$path" | (LC_CTYPE=C; sed -z 's/.\{'"${#base}"'\}$//') )
         printf '%s\0' "$dir" >> "$deltadir/$base"
     done < <(cat "$md5dir/windows.path" "$md5dir/linux.path")
 
@@ -502,7 +504,7 @@ mkdir -p '"$stagingpatchdir"'
         # md5sum does not allow -z and -c at the same time.
         # shellcheck disable=SC2016 # variables should be expanded in the script, not here
         printf '%s\n' '[ -z "$GOGDIFF_SKIPDIGESTS" ] && verify << EOF'
-        sed -z -E '/[\n\r\]/ { s/\\/\\\\/g; s/\n/\\n/g; s/\r/\\r/g; s/(.*)/\\\1/; }' "$md5dir/linux.md5" | tr '\0' '\n'
+        csed -z -E '/[\n\r\]/ { s/\\/\\\\/g; s/\n/\\n/g; s/\r/\\r/g; s/(.*)/\\\1/; }' "$md5dir/linux.md5" | tr '\0' '\n'
         printf 'EOF\n'
 
         # Ensure we don't try to execute the tar at the end
@@ -510,7 +512,7 @@ mkdir -p '"$stagingpatchdir"'
     } > "$script"
 
     # We are done with $script, replace the header size placeholder
-    sed -i '/^\s*dd skip=/ s/'"$size_placeholder"/"$(printf %-${#size_placeholder}d "$(stat -c %s "$script")")"/ "$script"
+    csed -i '/^\s*dd skip=/ s/'"$size_placeholder"/"$(printf %-${#size_placeholder}d "$(stat -c %s "$script")")"/ "$script"
 
     # Append Linux-only files and patches while skipping the files from which the patches were made.
     # We should also save symlinks, as they were not hashed and do not appear in linux.path;
