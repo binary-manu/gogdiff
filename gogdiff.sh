@@ -327,6 +327,7 @@ step_compute_md5() {
         local base
         base="${path##*/}"
         local dir
+        # IMPORTANT: every dirname placed in "dir" has a / at the end
         readline_null_terminated dir < <(printf '%s' "$path" | sed -z 's/.\{'"${#base}"'\}$//')
         printf '%s\0' "$dir" >> "$deltadir/$base"
     done < <(cat "$md5dir/windows.path" "$md5dir/linux.path")
@@ -351,8 +352,10 @@ step_compute_md5() {
                 local pdir="$patchdir/$lpath"
                 install -d "$pdir"
                 xdelta3 -e -s "$wingamedir/$wpath/$base" "$linuxgamedir/$lpath/$base" "$pdir/$base"
-                printf '%s\0' "$wpath/$base" >> "$md5dir/wpatches.path"
-                printf '%s\0' "$lpath/$base" >> "$md5dir/lpatches.path"
+                # Don't add a / between Xpath and base, since Xpath already ends with a / by construction.
+                # Otherwise, patched files will NOT be exckuded from the archive.
+                printf '%s\0' "${wpath}$base" >> "$md5dir/wpatches.path"
+                printf '%s\0' "${lpath}$base" >> "$md5dir/lpatches.path"
             fi
         } < "$dirlist"
     done < <(find "$deltadir" -type f -print0)
