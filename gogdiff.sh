@@ -197,7 +197,7 @@ stored in the delta script. The default is -z, which result in an gzipped tar.
 
 <firststep> is the script step where to start. It can be used to skip
 steps such as game installations, that have already been done. Steps are:
-windows, linuz, digest, script.
+windows, linux, digest, script.
 EOF
         exit 1
        ;;
