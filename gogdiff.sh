@@ -80,12 +80,15 @@ declare -r ERR_ALLCOMMONFILES=6
 ########## Utilities ##########
 ###############################
 
+# Invoke sed in a way that treats individual bytes as characters. Workaround to
+# sed not matching byte sequences that by chance would be invalid in UTF-8. See
+# the GNU sed manual.
 csed() {
     env LC_CTYPE=C sed "$@"
 }
 
-# Placeholder for delta script header size. Will be replaced by the mount of
-# script data before the compressed archive. Must be at leass as long as the decimal
+# Placeholder for delta script header size. Will be replaced by the amount of
+# script data before the compressed archive. Must be at least as long as the decimal
 # representation of the size of header code.
 declare -r size_placeholder=XXXXXXXXX
 
@@ -364,7 +367,7 @@ step_compute_md5() {
 
 
     # Let's filter some corner cases that make a delta script useless.
-    # We don't want to go head if:
+    # We don't want to go ahead if:
     #  1) the two folders are identical: clearly there is no advantage is a script
     #     that has nothing to add, remove or just rename;
     #  2) no files are common or patchable: we have just two completely unrelated folders
