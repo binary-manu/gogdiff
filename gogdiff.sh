@@ -333,10 +333,9 @@ step_compute_md5() {
         base="${path##*/}"
         local dir
         # IMPORTANT: every dirname placed in "dir" has a / at the end
-        readline_null_terminated dir < <(printf '%s' "$path" | (LC_CTYPE=C; sed -z 's/.\{'"${#base}"'\}$//') )
+        readline_null_terminated dir < <(printf '%s' "$path" | csed -z 's/.\{'"${#base}"'\}$//' )
         printf '%s\0' "$dir" >> "$deltadir/$base"
     done < <(cat "$md5dir/windows.path" "$md5dir/linux.path")
-
     local npatch
     npatch=0
     while :; do
