@@ -304,8 +304,8 @@ step_compute_md5() {
     info "The Windows installation contains $(count_files "$wingamedir") files"
     info "The Linux installation contains $(count_files "$linuxgamedir") files"
 
-    rm -rf "$md5dir" "$patchdir" "$deltadir"
-    mkdir -p "$md5dir" "$patchdir" "$deltadir"
+    rm -rf "$md5dir"
+    mkdir -p "$md5dir"
 
     write_sorted_md5sums "$wingamedir" > "$md5dir/windows.md5"
     write_sorted_md5sums "$linuxgamedir" > "$md5dir/linux.md5"
@@ -315,13 +315,18 @@ step_compute_md5() {
     md5_difference "$md5dir/linux.md5"   "$md5dir/windows.md5" > "$md5dir/linux.path"
     # Extract the set of common MD5s between Linux and Windows
     md5_intersection "$md5dir/windows.md5" "$md5dir/linux.md5" > "$md5dir/common.md5"
+}
 
+step_compute_patches() {
     # Look for files that could be used to compute patches with xdelta3.
     # We only consider files that:
     #   - have identical basenames in both Linux and Windows;
     #   - the basename must be unique within the Windows and Linux installations
     #     individually, otherwise it would be ambiguous which file to choose from
     #     either side.
+
+    rm -rf "$patchdir" "$deltadir"
+    mkdir -p "$patchdir" "$deltadir"
     # These files must exists, even if empty, as the script uses them later on
     : > "$md5dir/wpatches.path"
     : > "$md5dir/lpatches.path"
@@ -551,6 +556,10 @@ linux)
 digest)
     info "Starting step 'digest'"
     step_compute_md5
+    ;&
+patch)
+    info "Starting step 'patch'"
+    step_compute_patches
     ;&
 script)
     info "Starting step 'script'"
