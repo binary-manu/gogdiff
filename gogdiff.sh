@@ -358,7 +358,7 @@ step_compute_md5() {
                 install -d "$pdir"
                 xdelta3 -e -s "$wingamedir/$wpath/$base" "$linuxgamedir/$lpath/$base" "$pdir/$base"
                 # Don't add a / between Xpath and base, since Xpath already ends with a / by construction.
-                # Otherwise, patched files will NOT be exckuded from the archive.
+                # Otherwise, patched files will NOT be excluded from the archive.
                 printf '%s\0' "${wpath}$base" >> "$md5dir/wpatches.path"
                 printf '%s\0' "${lpath}$base" >> "$md5dir/lpatches.path"
             fi
