@@ -167,7 +167,7 @@ setup_loggers
 
 OPTIND=1
 while [ $OPTIND -le $# ]; do
-    getopts ":w:l:o:c:s:" OPT
+    getopts ":w:l:o:c:s:p:" OPT
     case "$OPT" in
     w) wininstaller="$OPTARG"
        ;;
@@ -179,9 +179,13 @@ while [ $OPTIND -le $# ]; do
        ;;
     s) firststep="$OPTARG"
        ;;
+    p) userpatches="$OPTARG"
+       ;;
     *) 
         cat << EOF
-$0 -w <wininst> -l <linuxinst> -o <outdir> [-c <compopts>] [-s <firststep>]
+$0 
+  -w <wininst> -l <linuxinst> -o <outdir> [-c <compopts>] [-s <firststep>]
+  [-p <userpatches>]
 
 <wininst> is either the path to a GOG Windows game installer executable
 or the path to a folder where such a game has already been installed (this is
@@ -201,6 +205,14 @@ stored in the delta script. The default is -z, which result in an gzipped tar.
 <firststep> is the script step where to start. It can be used to skip
 steps such as game installations, that have already been done. Steps are:
 windows, linux, digest, script.
+
+<userpatches> is a pathname pointing to a file containing an even number of
+null-terminated pathnames. Each pair of consecutive pathnames (winpath,
+linuxpath) signals that linuxpath should be stored in patched form using winfile
+as the source file for patch computation. If linuxpath can be handled via
+renaming or is already a candidate for patching using a different source file,
+the pair is ignored. Basically, it can force gogdiff to create patches for files
+that would otherwise be stored as a whole.
 EOF
         exit 1
        ;;
@@ -368,6 +380,28 @@ step_compute_patches() {
             fi
         } < "$dirlist"
     done < <(find "$deltadir" -type f -print0)
+
+    # User patches
+    if [ -n "$userpatches" ]; then
+        while :; do
+            readline_null_terminated wpath
+            readline_null_terminated lpath
+            [ -z "$wpath" ] && break
+            [ -z "$lpath" ] && fatal ERR_BADCLI "User patches file must contains an even number of pathnames"
+
+            # Skip linux paths that are already marked for patching or are common
+            { grep -Fqe "$lpath" "$md5dir/lpatches.path" || ! grep -Fqe "$lpath" "$md5dir/linux.path"; } && continue
+
+            npatch="$((npatch + 1))" 
+            pfile="$patchdir/$lpath"
+            install -d "${pfile%/*}"
+            xdelta3 -e -s "$wingamedir/$wpath" "$linuxgamedir/$lpath" "$pfile"
+            printf '%s\0' "$wpath" >> "$md5dir/wpatches.path"
+            printf '%s\0' "$lpath" >> "$md5dir/lpatches.path"
+
+        done < "$userpatches"
+    fi
+
 
 
     # Let's filter some corner cases that make a delta script useless.
