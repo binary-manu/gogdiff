@@ -181,9 +181,9 @@ while [ $OPTIND -le $# ]; do
        ;;
     p) userpatches="$OPTARG"
        ;;
-    *) 
+    *)
         cat << EOF
-$0 
+$0
   -w <wininst> -l <linuxinst> -o <outdir> [-c <compopts>] [-s <firststep>]
   [-p <userpatches>]
 
@@ -369,7 +369,7 @@ step_compute_patches() {
             readline_null_terminated extrapath
             if [ -z "$extrapath" ] && [ -n "$wpath" ] && [ -n "$lpath" ] &&
                 [ -f "$wingamedir/$wpath/$base" ] && [ -f "$linuxgamedir/$lpath/$base" ]; then
-                npatch="$((npatch + 1))" 
+                npatch="$((npatch + 1))"
                 local pdir="$patchdir/$lpath"
                 install -d "$pdir"
                 xdelta3 -e -s "$wingamedir/$wpath/$base" "$linuxgamedir/$lpath/$base" "$pdir/$base"
@@ -392,7 +392,7 @@ step_compute_patches() {
             # Skip linux paths that are already marked for patching or are common
             { grep -Fqe "$lpath" "$md5dir/lpatches.path" || ! grep -Fqe "$lpath" "$md5dir/linux.path"; } && continue
 
-            npatch="$((npatch + 1))" 
+            npatch="$((npatch + 1))"
             pfile="$patchdir/$lpath"
             install -d "${pfile%/*}"
             xdelta3 -e -s "$wingamedir/$wpath" "$linuxgamedir/$lpath" "$pfile"
@@ -506,13 +506,13 @@ mkdir -p '"$stagingpatchdir"'
                 readline_null_terminated wpath <&11
                 readline_null_terminated lpath <&12
                 printf 'move_file %q %q/%q\n' "$wpath" "$stagingdir" "$lpath"
-                
+
                 # All other Windows pathnames for the same MD5 are deleted
                 xargs -0 -r -I'{}' printf 'remove_file %q\n' '{}' <&11
 
                 # All other Linux pathnames for the same MD5 are symlinked or copied
                 xargs -0 -r -I'{}' printf 'copy_file %q/%q %q/%q\n' "$stagingdir" "$lpath" "$stagingdir" '{}' <&12
-            } 11< <(md5_find_all_matches "$common" "$md5dir/windows.md5") 12< <(md5_find_all_matches "$common" "$md5dir/linux.md5") 
+            } 11< <(md5_find_all_matches "$common" "$md5dir/windows.md5") 12< <(md5_find_all_matches "$common" "$md5dir/linux.md5")
         done < "$md5dir/common.md5"
 
         # Unpack the Linux only files, which are stored in a compressed tar just after the code
@@ -524,7 +524,7 @@ mkdir -p '"$stagingpatchdir"'
             readline_null_terminated lpath <&12
             [ -z "$wpath" ] && break
             printf 'patch_file %q %q\n' "$wpath" "$lpath"
-        done 11< "$md5dir/wpatches.path" 12< "$md5dir/lpatches.path" 
+        done 11< "$md5dir/wpatches.path" 12< "$md5dir/lpatches.path"
 
         # Delete Windows-only files
         xargs -0 -r -I'{}' printf 'remove_file %q\n' '{}' < "$md5dir/windows.path"
@@ -534,12 +534,12 @@ mkdir -p '"$stagingpatchdir"'
 
         # Move files from the staging directory to the PWD, since there can no longer be conflicts
         printf '(cd %q; find . -mindepth 1 -maxdepth 1 -print0 | xargs -I"{}" -0 -r mv -t .. "{}")\n' "$stagingdir"
-        printf 'remove_folder %q\n' "$stagingdir" 
+        printf 'remove_folder %q\n' "$stagingdir"
 
         # Move files from the staging patch directory to the PWD, overwriting the patches with the same names
         # Here we take advantage of the fact that the target file already exists.
         printf '(cd %q; find . -type f -print0 | xargs -I"{}" -0 -r mv "{}" "../{}")\n' "$stagingpatchdir"
-        printf 'remove_folder %q\n' "$stagingpatchdir" 
+        printf 'remove_folder %q\n' "$stagingpatchdir"
 
         # After unpacking, perform MD5 checks on the final files
         # We translate the zero-terminated format to the line-oriented escaped format, since
@@ -564,7 +564,7 @@ mkdir -p '"$stagingpatchdir"'
     # that need escaping
     (
         cd "$linuxgamedir"
-        { 
+        {
             find . \( -type l -o -type d -empty \) -print0
             sort -z "$md5dir/linux.path" "$md5dir/lpatches.path" | uniq -zu
             find "$patchsymlink" -type f -print0
