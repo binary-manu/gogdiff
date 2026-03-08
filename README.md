@@ -1,3 +1,5 @@
+⚠️ **Migrated to https://codeberg.org/binary-manu/gogdiff** ⚠️
+
 # gogdiff.sh: a Bash script that generates self-extracting patches to turn Windows GOG releases into their Linux versions
 
 gogdiff.sh (or simply gogdiff for brevity) is a Bash script that aims at
